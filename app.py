@@ -1,6 +1,8 @@
 
 import streamlit as st
 import pandas as pd
+import joblib
+from pathlib import Path
 
 st.set_page_config(
     page_title="Retail Sales ML Dashboard",
@@ -8,63 +10,64 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Retail Sales Machine Learning Dashboard")
-st.write("Analyze retail sales using machine learning.")
+st.title("Retail Sales ML Dashboard")
+st.write("Regression, Classification and Customer Clustering")
+
+# File paths
+BASE_DIR = Path(__file__).parent
+DATA_PATH = BASE_DIR / "Sales_transactions_2022_2025.csv"
+MODEL_DIR = BASE_DIR / "models"
+
+# Load dataset
+@st.cache_data
+def load_data():
+    return pd.read_csv(DATA_PATH)
+
+# Load model bundles
+@st.cache_resource
+def load_models():
+    regression = joblib.load(
+        MODEL_DIR / "regression_bundle_compressed.joblib"
+    )
+    classification = joblib.load(
+        MODEL_DIR / "classification_bundle.joblib"
+    )
+    clustering = joblib.load(
+        MODEL_DIR / "clustering_bundle.joblib"
+    )
+    return regression, classification, clustering
 
 # Sidebar navigation
-st.sidebar.title("Navigation")
-
 page = st.sidebar.radio(
-    "Choose a section",
-    [
-        "Overview",
-        "Regression",
-        "Classification",
-        "Clustering"
-    ]
+    "Choose ML Task",
+    ["Overview", "Regression", "Classification", "Clustering"]
 )
 
-# Upload dataset
-uploaded_file = st.sidebar.file_uploader(
-    "Upload retail sales CSV",
-    type=["csv"]
-)
+try:
+    df = load_data()
+    reg_bundle, clf_bundle, cluster_bundle = load_models()
 
-df = None
+    if page == "Overview":
+        st.subheader("Dataset Overview")
+        st.write(f"Number of rows: {df.shape[0]}")
+        st.write(f"Number of columns: {df.shape[1]}")
+        st.dataframe(df.head())
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    elif page == "Regression":
+        st.subheader("Profit Prediction")
+        st.info("Next, we will connect your trained regression model to user inputs.")
 
-if page == "Overview":
-    st.header("Dataset Overview")
+    elif page == "Classification":
+        st.subheader("Return Status Prediction")
+        st.info("Next, we will connect your trained classification model to user inputs.")
 
-    if df is not None:
-        col1, col2, col3 = st.columns(3)
+    elif page == "Clustering":
+        st.subheader("Customer Segmentation")
+        st.info("Next, we will connect your trained clustering model to user inputs.")
 
-        col1.metric("Total Records", f"{len(df):,}")
-        col2.metric("Total Features", len(df.columns))
-        col3.metric(
-            "Missing Values",
-            int(df.isnull().sum().sum())
-        )
-
-        st.subheader("Dataset Preview")
-        st.dataframe(df.head(10), use_container_width=True)
-
-        st.subheader("Column Information")
-        st.write(df.dtypes.astype(str))
-
-    else:
-        st.info("Upload your retail sales CSV using the sidebar.")
-
-elif page == "Regression":
-    st.header("Regression Analysis")
-    st.write("Regression models and evaluation metrics go here.")
-
-elif page == "Classification":
-    st.header("Classification Analysis")
-    st.write("Return_Flag prediction and classification metrics go here.")
-
-elif page == "Clustering":
-    st.header("Customer Segmentation")
-    st.write("Clustering models and customer groups go here.")
+except Exception as e:
+    st.error(f"Could not load the dataset or models: {e}")
+    st.info(
+        "Check that the CSV and all three model files exist "
+        "at the paths shown in the repository structure."
+    )
