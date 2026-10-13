@@ -1,4 +1,4 @@
-```python
+
 import os
 import streamlit as st
 import pandas as pd
@@ -267,4 +267,3 @@ if submitted:
 
 st.sidebar.title("Navigation")
 st.sidebar.info("Regression module only")
-```
