@@ -55,7 +55,8 @@ try:
 
     elif page == "Regression":
         st.subheader("Profit Prediction")
-        st.info("Next, we will connect your trained regression model to user inputs.")
+        st.write("Regression bundle keys:", list(reg_bundle.keys()))
+        st.write("Bundle details:", reg_bundle)
 
     elif page == "Classification":
         st.subheader("Return Status Prediction")
