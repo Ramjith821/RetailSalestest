@@ -286,20 +286,212 @@ try:
     # CLASSIFICATION
     # ==================================================
 
+    
     elif page == "Classification":
-        st.subheader("Return Status Prediction")
-
-        st.write("Classification bundle keys:")
-        st.json(list(clf_bundle.keys()))
-
-        st.write("Classification bundle details:")
-        st.write(clf_bundle)
-
-        st.info(
-            "This diagnostic view helps us identify the saved "
-            "classification model, preprocessing pipeline and features "
-            "before building the prediction form."
+        st.subheader("📦 Return Status Prediction")
+        st.write(
+            "Enter transaction details to estimate whether "
+            "the transaction will be returned."
         )
+
+        features = clf_bundle["features"]
+        models = clf_bundle["models"]
+        preprocessor = clf_bundle["preprocessor"]
+        bounds = clf_bundle.get("iqr_bounds", {})
+
+        def get_options(column):
+            if column in df.columns:
+                values = (
+                    df[column].dropna().astype(str).unique().tolist()
+                )
+                if values:
+                    return sorted(values)
+            return ["Unknown"]
+
+        with st.form("classification_form"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                quantity = st.number_input(
+                    "Quantity", min_value=1, value=2,
+                    key="clf_quantity"
+                )
+                unit_price = st.number_input(
+                    "Unit Price", min_value=0.0, value=100.0,
+                    step=10.0, key="clf_unit_price"
+                )
+                discount = st.number_input(
+                    "Discount Percentage", min_value=0.0,
+                    max_value=100.0, value=10.0,
+                    key="clf_discount"
+                )
+                customer_age = st.number_input(
+                    "Customer Age", min_value=1,
+                    max_value=100, value=30,
+                    key="clf_age"
+                )
+                delivery_days = st.number_input(
+                    "Delivery Days", min_value=0, value=3,
+                    key="clf_delivery"
+                )
+
+            with col2:
+                rating = st.slider(
+                    "Customer Rating", min_value=1.0,
+                    max_value=5.0, value=4.0, step=0.5,
+                    key="clf_rating"
+                )
+                product_category = st.selectbox(
+                    "Product Category",
+                    get_options("Product_Category"),
+                    key="clf_category"
+                )
+                customer_segment = st.selectbox(
+                    "Customer Segment",
+                    get_options("Customer_Segment"),
+                    key="clf_segment"
+                )
+                sales_channel = st.selectbox(
+                    "Sales Channel",
+                    get_options("Sales_Channel"),
+                    key="clf_channel"
+                )
+                payment_method = st.selectbox(
+                    "Payment Method",
+                    get_options("Payment_Method"),
+                    key="clf_payment"
+                )
+
+            model_name = st.selectbox(
+                "Choose Classification Model",
+                list(models.keys()),
+                index=(
+                    list(models.keys()).index("Random Forest Classifier")
+                    if "Random Forest Classifier" in models
+                    else 0
+                )
+            )
+
+            submitted = st.form_submit_button(
+                "Predict Return Status",
+                use_container_width=True
+            )
+
+        if submitted:
+            try:
+                from datetime import datetime
+
+                now = datetime.now()
+                gross = quantity * unit_price
+                discount_amount = gross * discount / 100
+                sales_amount = gross - discount_amount
+
+                # Fill the full feature set expected by the saved model.
+                row = {}
+
+                fallbacks = {
+                    "Customer_Age": customer_age,
+                    "Quantity": quantity,
+                    "Unit_Price": unit_price,
+                    "Discount_Percentage": discount,
+                    "Sales_Amount": sales_amount,
+                    "Delivery_Days": delivery_days,
+                    "Customer_Rating": rating,
+                    "Product_Category": product_category,
+                    "Customer_Segment": customer_segment,
+                    "Sales_Channel": sales_channel,
+                    "Payment_Method": payment_method,
+                    "Gross_Amount_Before_Discount": gross,
+                    "Discount_Amount": discount_amount,
+                    "Order_Year": now.year,
+                    "Order_Month": now.month,
+                    "Order_Day": now.day,
+                    "Order_DayOfWeek": now.weekday(),
+                    "Order_Quarter": (now.month - 1) // 3 + 1,
+                    "Order_Hour": now.hour,
+                    "Is_Weekend": int(now.weekday() >= 5),
+                }
+
+                for feature in features:
+                    if feature in fallbacks:
+                        row[feature] = fallbacks[feature]
+
+                    elif feature in df.columns:
+                        series = df[feature].dropna()
+
+                        if pd.api.types.is_numeric_dtype(df[feature]):
+                            row[feature] = (
+                                float(series.median())
+                                if not series.empty else 0.0
+                            )
+                        else:
+                            modes = series.mode()
+                            row[feature] = (
+                                modes.iloc[0]
+                                if not modes.empty else "Unknown"
+                            )
+
+                    else:
+                        row[feature] = "Unknown"
+
+                # Estimate cost and profit when they are model inputs.
+                if "Cost_Amount" in features:
+                    cost_values = (
+                        df["Cost_Amount"].dropna()
+                        if "Cost_Amount" in df.columns
+                        else pd.Series(dtype=float)
+                    )
+                    median_cost = (
+                        float(cost_values.median())
+                        if not cost_values.empty else sales_amount * 0.7
+                    )
+                    row["Cost_Amount"] = median_cost
+
+                if "Profit" in features:
+                    row["Profit"] = (
+                        sales_amount - row.get("Cost_Amount", 0)
+                    )
+
+                input_df = pd.DataFrame([row], columns=features)
+
+                for feature, limits in bounds.items():
+                    if feature in input_df.columns:
+                        input_df[feature] = input_df[feature].clip(
+                            lower=limits[0],
+                            upper=limits[1]
+                        )
+
+                transformed = preprocessor.transform(input_df)
+                model = models[model_name]
+                prediction = model.predict(transformed)[0]
+
+                st.subheader("Prediction Result")
+                st.success(f"Predicted Return Status: {prediction}")
+
+                if hasattr(model, "predict_proba"):
+                    probabilities = model.predict_proba(transformed)[0]
+                    classes = model.classes_
+
+                    probability_df = pd.DataFrame({
+                        "Status": classes,
+                        "Probability (%)": probabilities * 100
+                    })
+
+                    st.write("Model probability estimates")
+                    st.dataframe(
+                        probability_df,
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+                st.warning(
+                    "Some fields are filled with dataset defaults or "
+                    "estimates. The model was trained using the full "
+                    "feature set, so these results are preliminary."
+                )
+
+            except Exception as e:
+                st.error(f"Prediction failed: {e}")
 
     # ==================================================
     # CLUSTERING
