@@ -1,312 +1,270 @@
-
+```python
+import os
 import streamlit as st
 import pandas as pd
+import numpy as np
 import joblib
-from pathlib import Path
-from datetime import datetime
 
-# ---------------- PAGE CONFIG ----------------
+# --------------------------------------------------
+# PAGE CONFIG
+# --------------------------------------------------
 
 st.set_page_config(
-    page_title="Retail Sales ML Dashboard",
-    page_icon="📊",
+    page_title="Retail Sales - Regression",
+    page_icon="📈",
     layout="wide"
 )
 
-st.title("📊 Retail Sales ML Dashboard")
-st.write("Regression, Classification and Customer Clustering")
+st.title("📈 Retail Sales Prediction")
+st.write("Predict the target value using a trained regression model.")
 
-BASE_DIR = Path(__file__).parent
-DATA_PATH = BASE_DIR / "Sales_transactions_2022_2025.csv"
-MODEL_DIR = BASE_DIR / "models"
+# --------------------------------------------------
+# FILE PATHS
+# --------------------------------------------------
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ---------------- LOAD DATA ----------------
-
-@st.cache_data
-def load_data():
-    return pd.read_csv(DATA_PATH)
-
-
-# ---------------- LOAD MODELS ----------------
-
-@st.cache_resource
-def load_models():
-    regression = joblib.load(
-        MODEL_DIR / "regression_bundle_compressed.joblib"
-    )
-    classification = joblib.load(
-        MODEL_DIR / "classification_bundle.joblib"
-    )
-    clustering = joblib.load(
-        MODEL_DIR / "clustering_bundle.joblib"
-    )
-
-    return regression, classification, clustering
-
-
-# ---------------- HELPERS ----------------
-
-def category_options(df, column):
-    if column in df.columns:
-        values = df[column].dropna().astype(str).unique().tolist()
-        if values:
-            return sorted(values)
-    return ["Unknown"]
-
-
-def build_regression_input(
-    df, features, bounds, quantity, unit_price, discount,
-    customer_age, delivery_days, rating, product_category,
-    customer_segment, sales_channel, payment_method
-):
-    """Create every feature expected by the saved regression model."""
-
-    now = datetime.now()
-
-    gross_amount = quantity * unit_price
-    discount_amount = gross_amount * discount / 100
-
-    # Defaults for features that may not exist in the original CSV.
-    fallbacks = {
-        "Customer_Age": customer_age,
-        "Quantity": quantity,
-        "Unit_Price": unit_price,
-        "Discount_Percentage": discount,
-        "Delivery_Days": delivery_days,
-        "Customer_Rating": rating,
-        "Product_Category": product_category,
-        "Customer_Segment": customer_segment,
-        "Sales_Channel": sales_channel,
-        "Payment_Method": payment_method,
-        "Gross_Amount_Before_Discount": gross_amount,
-        "Discount_Amount": discount_amount,
-        "Order_Year": now.year,
-        "Order_Month": now.month,
-        "Order_Day": now.day,
-        "Order_DayOfWeek": now.weekday(),
-        "Order_Quarter": (now.month - 1) // 3 + 1,
-        "Order_Hour": now.hour,
-        "Is_Weekend": int(now.weekday() >= 5),
-    }
-
-    row = {}
-
-    for feature in features:
-        if feature in fallbacks:
-            row[feature] = fallbacks[feature]
-
-        elif feature in df.columns:
-            series = df[feature].dropna()
-
-            if pd.api.types.is_numeric_dtype(df[feature]):
-                row[feature] = (
-                    float(series.median()) if not series.empty else 0.0
-                )
-            else:
-                modes = series.mode()
-                row[feature] = (
-                    modes.iloc[0] if not modes.empty else "Unknown"
-                )
-
-        else:
-            # Safe default for an unknown feature.
-            # OneHotEncoder(handle_unknown="ignore") can handle
-            # unseen categorical values in the saved pipeline.
-            row[feature] = "Unknown"
-
-    return pd.DataFrame([row], columns=features)
-
-
-# ---------------- NAVIGATION ----------------
-
-page = st.sidebar.radio(
-    "Choose ML Task",
-    ["Overview", "Regression", "Classification", "Clustering"]
+DATA_PATH = os.path.join(
+    BASE_DIR, "Sales_transactions_2022_2025.csv"
 )
 
+MODEL_PATH = os.path.join(
+    BASE_DIR, "models", "regression_bundle_compressed.joblib"
+)
 
-# ---------------- APPLICATION ----------------
+# --------------------------------------------------
+# LOAD FILES
+# --------------------------------------------------
+
+@st.cache_data
+def load_data(path):
+    return pd.read_csv(path)
+
+@st.cache_resource
+def load_model(path):
+    return joblib.load(path)
+
+if not os.path.exists(DATA_PATH):
+    st.error(f"Dataset not found: {DATA_PATH}")
+    st.stop()
+
+if not os.path.exists(MODEL_PATH):
+    st.error(f"Regression model not found: {MODEL_PATH}")
+    st.stop()
 
 try:
-    df = load_data()
-    reg_bundle, clf_bundle, cluster_bundle = load_models()
-
-    # ================= OVERVIEW =================
-
-    if page == "Overview":
-        st.subheader("Dataset Overview")
-
-        col1, col2 = st.columns(2)
-        col1.metric("Total Rows", f"{df.shape[0]:,}")
-        col2.metric("Total Columns", df.shape[1])
-
-        st.subheader("Dataset Preview")
-        st.dataframe(df.head(10), use_container_width=True)
-
-        st.subheader("Summary Statistics")
-        st.dataframe(
-            df.describe(include="all").T,
-            use_container_width=True
-        )
-
-    # ================= REGRESSION =================
-
-    elif page == "Regression":
-        st.subheader("💰 Profit Prediction")
-        st.write("Enter the transaction details to estimate profit.")
-
-        features = reg_bundle["features"]
-        models = reg_bundle["models"]
-        preprocessor = reg_bundle["preprocessor"]
-        bounds = reg_bundle.get("iqr_bounds", {})
-
-        with st.form("profit_prediction_form"):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                quantity = st.number_input(
-                    "Quantity", min_value=1, value=2
-                )
-
-                unit_price = st.number_input(
-                    "Unit Price", min_value=0.0, value=100.0,
-                    step=10.0
-                )
-
-                discount = st.number_input(
-                    "Discount Percentage", min_value=0.0,
-                    max_value=100.0, value=10.0
-                )
-
-                customer_age = st.number_input(
-                    "Customer Age", min_value=1, max_value=100,
-                    value=30
-                )
-
-                delivery_days = st.number_input(
-                    "Delivery Days", min_value=0, value=3
-                )
-
-            with col2:
-                rating = st.slider(
-                    "Customer Rating", min_value=1.0,
-                    max_value=5.0, value=4.0, step=0.5
-                )
-
-                product_category = st.selectbox(
-                    "Product Category",
-                    category_options(df, "Product_Category")
-                )
-
-                customer_segment = st.selectbox(
-                    "Customer Segment",
-                    category_options(df, "Customer_Segment")
-                )
-
-                sales_channel = st.selectbox(
-                    "Sales Channel",
-                    category_options(df, "Sales_Channel")
-                )
-
-                payment_method = st.selectbox(
-                    "Payment Method",
-                    category_options(df, "Payment_Method")
-                )
-
-            # Polynomial Regression may use a separate feature
-            # transformation. Exclude it from this common pipeline
-            # until its specific transformation is saved and connected.
-            available_models = {
-                name: model
-                for name, model in models.items()
-                if "Polynomial Regression" not in name
-            }
-
-            if not available_models:
-                available_models = models
-
-            model_name = st.selectbox(
-                "Regression Model",
-                list(available_models.keys()),
-                index=(
-                    list(available_models.keys()).index(
-                        "Random Forest Regressor"
-                    )
-                    if "Random Forest Regressor" in available_models
-                    else 0
-                )
-            )
-
-            submitted = st.form_submit_button(
-                "Predict Profit",
-                use_container_width=True
-            )
-
-        if submitted:
-            try:
-                input_df = build_regression_input(
-                    df=df,
-                    features=features,
-                    bounds=bounds,
-                    quantity=quantity,
-                    unit_price=unit_price,
-                    discount=discount,
-                    customer_age=customer_age,
-                    delivery_days=delivery_days,
-                    rating=rating,
-                    product_category=product_category,
-                    customer_segment=customer_segment,
-                    sales_channel=sales_channel,
-                    payment_method=payment_method
-                )
-
-                # Apply training-time clipping where applicable.
-                for feature, limits in bounds.items():
-                    if feature in input_df.columns:
-                        input_df[feature] = input_df[feature].clip(
-                            lower=limits[0],
-                            upper=limits[1]
-                        )
-
-                # Apply the saved preprocessor and trained model.
-                transformed_input = preprocessor.transform(input_df)
-                selected_model = available_models[model_name]
-                prediction = selected_model.predict(transformed_input)[0]
-
-                st.success(f"Predicted Profit: {prediction:,.2f}")
-                st.caption(f"Model used: {model_name}")
-
-                st.warning(
-                    "Only 10 inputs are entered manually. Other features "
-                    "are filled with defaults or derived values. This can "
-                    "affect prediction accuracy; the model was trained "
-                    "using its original feature set."
-                )
-
-            except Exception as e:
-                st.error(f"Prediction failed: {e}")
-
-    # ================= CLASSIFICATION =================
-
-    elif page == "Classification":
-        st.subheader("Return Status Prediction")
-        st.info(
-            "The classification form will be connected next."
-        )
-
-    # ================= CLUSTERING =================
-
-    elif page == "Clustering":
-        st.subheader("Customer Segmentation")
-        st.info(
-            "The customer clustering interface will be connected next."
-        )
-
+    df = load_data(DATA_PATH)
+    bundle = load_model(MODEL_PATH)
 except Exception as e:
-    st.error(f"Could not load the dataset or models: {e}")
-    st.info(
-        "Verify that the CSV file and all three saved model files "
-        "exist in the repository."
-    )
+    st.error(f"Unable to load files: {e}")
+    st.stop()
 
+models = bundle.get("models", {})
+preprocessor = bundle.get("preprocessor")
+features = bundle.get("features", [])
+
+if not models or preprocessor is None or not features:
+    st.error("The regression bundle is missing required components.")
+    st.stop()
+
+# --------------------------------------------------
+# DATASET OVERVIEW
+# --------------------------------------------------
+
+with st.expander("View Dataset"):
+    st.dataframe(df.head(10), use_container_width=True)
+
+st.subheader("Dataset Overview")
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Total Records", f"{len(df):,}")
+col2.metric("Total Features", len(df.columns))
+col3.metric("Missing Values", f"{df.isna().sum().sum():,}")
+
+# --------------------------------------------------
+# HELPER FUNCTIONS
+# --------------------------------------------------
+
+def get_default(feature):
+    if feature not in df.columns:
+        return 0
+
+    series = df[feature].dropna()
+
+    if series.empty:
+        return 0
+
+    if pd.api.types.is_numeric_dtype(series):
+        return float(series.median())
+
+    return series.mode().iloc[0]
+
+
+def clip_to_bounds(feature, value):
+    bounds = bundle.get("iqr_bounds", {})
+    item = bounds.get(feature)
+
+    if item is None:
+        return value
+
+    lower = None
+    upper = None
+
+    if isinstance(item, dict):
+        lower = item.get("lower", item.get("lower_bound"))
+        upper = item.get("upper", item.get("upper_bound"))
+    elif isinstance(item, (tuple, list)) and len(item) >= 2:
+        lower, upper = item[0], item[1]
+
+    if (
+        lower is not None
+        and upper is not None
+        and isinstance(value, (int, float, np.number))
+    ):
+        return float(np.clip(value, lower, upper))
+
+    return value
+
+
+# --------------------------------------------------
+# REGRESSION INPUT FORM
+# --------------------------------------------------
+
+st.divider()
+st.subheader("Enter Transaction Details")
+
+model_name = st.selectbox(
+    "Choose Regression Algorithm",
+    list(models.keys())
+)
+
+values = {}
+
+numeric_fields = {
+    "Quantity": (1.0, 1.0),
+    "Unit_Price": (100.0, 10.0),
+    "Discount_Percentage": (0.0, 1.0),
+    "Customer_Age": (30.0, 1.0),
+    "Delivery_Days": (3.0, 1.0),
+    "Customer_Rating": (4.0, 0.5),
+}
+
+categorical_fields = [
+    "Product_Category",
+    "Customer_Segment",
+    "Sales_Channel",
+    "Payment_Method",
+]
+
+with st.form("regression_form"):
+
+    left, right = st.columns(2)
+
+    for i, (feature, settings) in enumerate(numeric_fields.items()):
+        if feature in features:
+            default, step = settings
+
+            if feature in df.columns:
+                try:
+                    default = float(get_default(feature))
+                except (TypeError, ValueError):
+                    pass
+
+            with (left if i % 2 == 0 else right):
+                values[feature] = st.number_input(
+                    feature.replace("_", " "),
+                    min_value=0.0,
+                    value=default,
+                    step=step,
+                    key=f"reg_{feature}",
+                )
+
+    for i, feature in enumerate(categorical_fields):
+        if feature in features:
+            with (left if i % 2 == 0 else right):
+                if feature in df.columns:
+                    options = df[feature].dropna().unique().tolist()
+                else:
+                    options = []
+
+                if options:
+                    default = get_default(feature)
+                    index = options.index(default) if default in options else 0
+
+                    values[feature] = st.selectbox(
+                        feature.replace("_", " "),
+                        options,
+                        index=index,
+                        key=f"reg_cat_{feature}",
+                    )
+                else:
+                    values[feature] = st.text_input(
+                        feature.replace("_", " "),
+                        key=f"reg_text_{feature}",
+                    )
+
+    submitted = st.form_submit_button("Predict Sales")
+
+# --------------------------------------------------
+# PREDICTION
+# --------------------------------------------------
+
+if submitted:
+    try:
+        # Fill unentered features with dataset defaults.
+        for feature in features:
+            if feature not in values:
+                values[feature] = get_default(feature)
+
+        # Derive common amount features when present.
+        quantity = values.get("Quantity", get_default("Quantity"))
+        unit_price = values.get("Unit_Price", get_default("Unit_Price"))
+        discount = values.get(
+            "Discount_Percentage",
+            get_default("Discount_Percentage"),
+        )
+
+        gross_amount = quantity * unit_price
+        discount_amount = gross_amount * discount / 100.0
+
+        if "Gross_Amount_Before_Discount" in features:
+            values["Gross_Amount_Before_Discount"] = gross_amount
+
+        if "Discount_Amount" in features:
+            values["Discount_Amount"] = discount_amount
+
+        # Apply stored bounds to numeric inputs.
+        for feature in features:
+            values[feature] = clip_to_bounds(
+                feature, values[feature]
+            )
+
+        # Match the exact feature order expected by training.
+        input_df = pd.DataFrame(
+            [[values[feature] for feature in features]],
+            columns=features,
+        )
+
+        transformed = preprocessor.transform(input_df)
+        model = models[model_name]
+        prediction = model.predict(transformed)[0]
+
+        st.divider()
+        st.subheader("Prediction Result")
+        st.metric("Predicted Value", f"{float(prediction):,.2f}")
+
+        st.caption(
+            "Features not entered manually use dataset defaults. "
+            "The result is an estimate from the selected trained model."
+        )
+
+    except Exception as e:
+        st.error(f"Prediction failed: {type(e).__name__}: {e}")
+
+# --------------------------------------------------
+# FOOTER
+# --------------------------------------------------
+
+st.sidebar.title("Navigation")
+st.sidebar.info("Regression module only")
+```
