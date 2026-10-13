@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import pandas as pd
 import joblib
@@ -309,4 +309,4 @@ except Exception as e:
         "Verify that the CSV file and all three saved model files "
         "exist in the repository."
     )
-```
+
