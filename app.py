@@ -1,4 +1,4 @@
-
+```python
 import streamlit as st
 import pandas as pd
 import joblib
@@ -45,36 +45,29 @@ def load_models():
     return regression, classification, clustering
 
 
-# ---------------- HELPER FUNCTIONS ----------------
+# ---------------- HELPERS ----------------
 
 def category_options(df, column):
     if column in df.columns:
         values = df[column].dropna().astype(str).unique().tolist()
         if values:
             return sorted(values)
-
     return ["Unknown"]
 
 
 def build_regression_input(
-    df,
-    features,
-    quantity,
-    unit_price,
-    discount,
-    customer_age,
-    delivery_days,
-    rating,
-    product_category,
-    customer_segment,
-    sales_channel,
-    payment_method
+    df, features, bounds, quantity, unit_price, discount,
+    customer_age, delivery_days, rating, product_category,
+    customer_segment, sales_channel, payment_method
 ):
+    """Create every feature expected by the saved regression model."""
+
     now = datetime.now()
 
     gross_amount = quantity * unit_price
     discount_amount = gross_amount * discount / 100
 
+    # Defaults for features that may not exist in the original CSV.
     fallbacks = {
         "Customer_Age": customer_age,
         "Quantity": quantity,
@@ -117,6 +110,9 @@ def build_regression_input(
                 )
 
         else:
+            # Safe default for an unknown feature.
+            # OneHotEncoder(handle_unknown="ignore") can handle
+            # unseen categorical values in the saved pipeline.
             row[feature] = "Unknown"
 
     return pd.DataFrame([row], columns=features)
@@ -130,15 +126,13 @@ page = st.sidebar.radio(
 )
 
 
-# ---------------- MAIN APP ----------------
+# ---------------- APPLICATION ----------------
 
 try:
     df = load_data()
     reg_bundle, clf_bundle, cluster_bundle = load_models()
 
-    # ==================================================
-    # OVERVIEW
-    # ==================================================
+    # ================= OVERVIEW =================
 
     if page == "Overview":
         st.subheader("Dataset Overview")
@@ -156,13 +150,11 @@ try:
             use_container_width=True
         )
 
-    # ==================================================
-    # REGRESSION
-    # ==================================================
+    # ================= REGRESSION =================
 
     elif page == "Regression":
         st.subheader("💰 Profit Prediction")
-        st.write("Enter transaction details to estimate profit.")
+        st.write("Enter the transaction details to estimate profit.")
 
         features = reg_bundle["features"]
         models = reg_bundle["models"]
@@ -176,18 +168,22 @@ try:
                 quantity = st.number_input(
                     "Quantity", min_value=1, value=2
                 )
+
                 unit_price = st.number_input(
                     "Unit Price", min_value=0.0, value=100.0,
                     step=10.0
                 )
+
                 discount = st.number_input(
                     "Discount Percentage", min_value=0.0,
                     max_value=100.0, value=10.0
                 )
+
                 customer_age = st.number_input(
                     "Customer Age", min_value=1, max_value=100,
                     value=30
                 )
+
                 delivery_days = st.number_input(
                     "Delivery Days", min_value=0, value=3
                 )
@@ -197,25 +193,30 @@ try:
                     "Customer Rating", min_value=1.0,
                     max_value=5.0, value=4.0, step=0.5
                 )
+
                 product_category = st.selectbox(
                     "Product Category",
                     category_options(df, "Product_Category")
                 )
+
                 customer_segment = st.selectbox(
                     "Customer Segment",
                     category_options(df, "Customer_Segment")
                 )
+
                 sales_channel = st.selectbox(
                     "Sales Channel",
                     category_options(df, "Sales_Channel")
                 )
+
                 payment_method = st.selectbox(
                     "Payment Method",
                     category_options(df, "Payment_Method")
                 )
 
-            # Exclude polynomial model until its specific
-            # transformation pipeline is available.
+            # Polynomial Regression may use a separate feature
+            # transformation. Exclude it from this common pipeline
+            # until its specific transformation is saved and connected.
             available_models = {
                 name: model
                 for name, model in models.items()
@@ -245,20 +246,22 @@ try:
         if submitted:
             try:
                 input_df = build_regression_input(
-                    df,
-                    features,
-                    quantity,
-                    unit_price,
-                    discount,
-                    customer_age,
-                    delivery_days,
-                    rating,
-                    product_category,
-                    customer_segment,
-                    sales_channel,
-                    payment_method
+                    df=df,
+                    features=features,
+                    bounds=bounds,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    discount=discount,
+                    customer_age=customer_age,
+                    delivery_days=delivery_days,
+                    rating=rating,
+                    product_category=product_category,
+                    customer_segment=customer_segment,
+                    sales_channel=sales_channel,
+                    payment_method=payment_method
                 )
 
+                # Apply training-time clipping where applicable.
                 for feature, limits in bounds.items():
                     if feature in input_df.columns:
                         input_df[feature] = input_df[feature].clip(
@@ -266,62 +269,44 @@ try:
                             upper=limits[1]
                         )
 
+                # Apply the saved preprocessor and trained model.
                 transformed_input = preprocessor.transform(input_df)
-                prediction = available_models[model_name].predict(
-                    transformed_input
-                )[0]
+                selected_model = available_models[model_name]
+                prediction = selected_model.predict(transformed_input)[0]
 
                 st.success(f"Predicted Profit: {prediction:,.2f}")
                 st.caption(f"Model used: {model_name}")
+
                 st.warning(
-                    "Other features use representative or derived values. "
-                    "The model was trained using its original feature set, "
-                    "so these defaults can affect prediction accuracy."
+                    "Only 10 inputs are entered manually. Other features "
+                    "are filled with defaults or derived values. This can "
+                    "affect prediction accuracy; the model was trained "
+                    "using its original feature set."
                 )
 
             except Exception as e:
                 st.error(f"Prediction failed: {e}")
 
-    # ==================================================
-    # CLASSIFICATION
-    # ==================================================
+    # ================= CLASSIFICATION =================
 
     elif page == "Classification":
         st.subheader("Return Status Prediction")
-
-        st.write("Classification bundle keys:")
-        st.json(list(clf_bundle.keys()))
-
-        st.write("Classification bundle details:")
-        st.write(clf_bundle)
-
         st.info(
-            "This diagnostic view helps us identify the saved "
-            "classification model, preprocessing pipeline and features "
-            "before building the prediction form."
+            "The classification form will be connected next."
         )
 
-    # ==================================================
-    # CLUSTERING
-    # ==================================================
+    # ================= CLUSTERING =================
 
     elif page == "Clustering":
-        st.subheader("👥 Customer Segmentation")
-
+        st.subheader("Customer Segmentation")
         st.info(
-            "Customer clustering will be connected after inspecting "
-            "the saved clustering bundle."
+            "The customer clustering interface will be connected next."
         )
-
-        st.write("Clustering bundle keys:")
-        st.json(list(cluster_bundle.keys()))
-
-# ---------------- ERROR HANDLING ----------------
 
 except Exception as e:
     st.error(f"Could not load the dataset or models: {e}")
-
     st.info(
-        "Verify that the CSV file and all three model files exist "
-        "in the expected repository locations."
+        "Verify that the CSV file and all three saved model files "
+        "exist in the repository."
     )
+```
