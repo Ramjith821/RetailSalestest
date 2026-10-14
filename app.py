@@ -1,4 +1,4 @@
-```python
+
 import os
 import warnings
 import streamlit as st
@@ -527,4 +527,3 @@ elif page == "Classification":
 
 st.sidebar.divider()
 st.sidebar.caption("Retail Sales ML Dashboard")
-```
