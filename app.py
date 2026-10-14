@@ -25,6 +25,15 @@ from sklearn.svm import SVC
 
 warnings.filterwarnings("ignore")
 
+
+def create_onehot_encoder():
+    """Create a dense OneHotEncoder compatible with old and new sklearn."""
+    try:
+        return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    except TypeError:
+        return OneHotEncoder(handle_unknown="ignore", sparse=False)
+
+
 # ============================================================
 # PAGE CONFIGURATION
 # ============================================================
@@ -406,7 +415,7 @@ elif page == "Classification":
         categorical_pipeline = Pipeline([
             ("imputer", SimpleImputer(strategy="most_frequent")),
             # sparse=False supports older scikit-learn releases too.
-            ("onehot", OneHotEncoder(handle_unknown="ignore", sparse=False)),
+            ("onehot", create_onehot_encoder()),
         ])
         transformers.append(("categorical", categorical_pipeline, categorical_cols))
 
@@ -476,9 +485,7 @@ elif page == "Classification":
                 "categorical",
                 Pipeline([
                     ("imputer", SimpleImputer(strategy="most_frequent")),
-                    ("onehot", OneHotEncoder(
-                        handle_unknown="ignore", sparse=False
-                    )),
+                    ("onehot", create_onehot_encoder()),
                 ]),
                 cats,
             ))
